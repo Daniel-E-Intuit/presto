@@ -20,6 +20,7 @@ import com.facebook.presto.event.QueryMonitorConfig;
 import com.facebook.presto.eventlistener.EventListenerManager;
 import com.facebook.presto.execution.ClusterSizeMonitor;
 import com.facebook.presto.execution.ExecutionFailureInfo;
+import com.facebook.presto.execution.MockQueryExecution;
 import com.facebook.presto.execution.QueryExecution;
 import com.facebook.presto.execution.QueryStateMachine;
 import com.facebook.presto.execution.StageInfo;
@@ -30,6 +31,7 @@ import com.facebook.presto.metadata.SessionPropertyManager;
 import com.facebook.presto.operator.OperatorInfo;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.QueryId;
+import com.facebook.presto.spi.WarningCollector;
 import com.facebook.presto.spi.eventlistener.EventListener;
 import com.facebook.presto.spi.eventlistener.EventListenerFactory;
 import com.facebook.presto.spi.eventlistener.QueryCompletedEvent;
@@ -156,7 +158,7 @@ public class TestLocalDispatchQuery
                     throw new AccessDeniedException("sdf");
                 },
                 false,
-                (queryId, context) -> {
+                (queryId, context, warningCollector) -> {
                     CompletableFuture<?> future = new CompletableFuture<>();
                     future.completeExceptionally(new PrestoException(ABANDONED_TASK, "something went wrong"));
                     return future;
@@ -190,7 +192,7 @@ public class TestLocalDispatchQuery
                     throw new AccessDeniedException("sdf");
                 },
                 false,
-                (queryId, context) -> {
+                (queryId, context, warningCollector) -> {
                     throw new PrestoException(ABANDONED_QUERY, "something went wrong");
                 });
 
@@ -229,7 +231,7 @@ public class TestLocalDispatchQuery
                 false,
                 new QueryPrerequisites() {
                     @Override
-                    public CompletableFuture<?> waitForPrerequisites(QueryId queryId, QueryPrerequisitesContext context)
+                    public CompletableFuture<?> waitForPrerequisites(QueryId queryId, QueryPrerequisitesContext context, WarningCollector warningCollector)
                     {
                         return prequisitesFuture;
                     }
@@ -267,7 +269,7 @@ public class TestLocalDispatchQuery
                 dispatchQuery -> {},
                 execution -> {},
                 false,
-                (queryId, context) -> prequisitesFuture);
+                (queryId, context, warningCollector) -> prequisitesFuture);
 
         assertEquals(query.getBasicQueryInfo().getState(), WAITING_FOR_PREREQUISITES);
         assertFalse(eventListener.getQueryCompletedEvent().isPresent());
@@ -297,7 +299,7 @@ public class TestLocalDispatchQuery
                 },
                 execution -> {},
                 false,
-                (queryId, context) -> prerequisitesFuture);
+                (queryId, context, warningCollector) -> prerequisitesFuture);
 
         assertEquals(stateMachine.getBasicQueryInfo(Optional.empty()).getState(), WAITING_FOR_PREREQUISITES);
         query.startWaitingForPrerequisites();
@@ -320,7 +322,7 @@ public class TestLocalDispatchQuery
         LocalDispatchQuery query = new LocalDispatchQuery(
                 stateMachine,
                 createQueryMonitor(eventListener),
-                immediateFuture(null),
+                immediateFuture(new MockQueryExecution()),
                 createClusterSizeMonitor(0),
                 directExecutor(),
                 dispatchQuery -> {},
@@ -412,7 +414,7 @@ public class TestLocalDispatchQuery
         LocalDispatchQuery query = new LocalDispatchQuery(
                 stateMachine,
                 createQueryMonitor(eventListener),
-                immediateFuture(null),
+                immediateFuture(new MockQueryExecution()),
                 createClusterSizeMonitor(0),
                 directExecutor(),
                 dispatchQuery -> {},
@@ -432,7 +434,7 @@ public class TestLocalDispatchQuery
 
     private ClusterSizeMonitor createClusterSizeMonitor(int minimumNodes)
     {
-        return new ClusterSizeMonitor(new InMemoryNodeManager(), true, minimumNodes, minimumNodes, new Duration(10, MILLISECONDS), 1, new Duration(1, SECONDS));
+        return new ClusterSizeMonitor(new InMemoryNodeManager(), true, minimumNodes, minimumNodes, new Duration(10, MILLISECONDS), 1, 1, new Duration(1, SECONDS), 0);
     }
 
     private QueryMonitor createQueryMonitor(CountingEventListener eventListener)

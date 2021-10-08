@@ -177,10 +177,10 @@ public final class Page
         return wrapBlocksWithoutCopy(positionCount, newBlocks);
     }
 
-    public void compact()
+    public Page compact()
     {
         if (getRetainedSizeInBytes() <= getSizeInBytes()) {
-            return;
+            return this;
         }
 
         for (int i = 0; i < blocks.length; i++) {
@@ -202,6 +202,7 @@ public final class Page
         }
 
         updateRetainedSize();
+        return this;
     }
 
     private Map<DictionaryId, DictionaryBlockIndexes> getRelatedDictionaryBlocks()
@@ -290,22 +291,36 @@ public final class Page
      */
     public Page getLoadedPage()
     {
-        Block[] loadedBlocks = null;
         for (int i = 0; i < blocks.length; i++) {
             Block loaded = blocks[i].getLoadedBlock();
             if (loaded != blocks[i]) {
-                if (loadedBlocks == null) {
-                    loadedBlocks = blocks.clone();
+                // Transition to new block creation mode after the first newly loaded block is encountered
+                Block[] loadedBlocks = blocks.clone();
+                loadedBlocks[i++] = loaded;
+                for (; i < blocks.length; i++) {
+                    loadedBlocks[i] = blocks[i].getLoadedBlock();
                 }
-                loadedBlocks[i] = loaded;
+                return wrapBlocksWithoutCopy(positionCount, loadedBlocks);
             }
         }
+        // No newly loaded blocks
+        return this;
+    }
 
-        if (loadedBlocks == null) {
-            return this;
+    public Page getLoadedPage(int channel)
+    {
+        return wrapBlocksWithoutCopy(positionCount, new Block[]{this.blocks[channel].getLoadedBlock()});
+    }
+
+    public Page getLoadedPage(int... channels)
+    {
+        requireNonNull(channels, "channels is null");
+
+        Block[] blocks = new Block[channels.length];
+        for (int i = 0; i < channels.length; i++) {
+            blocks[i] = this.blocks[channels[i]].getLoadedBlock();
         }
-
-        return wrapBlocksWithoutCopy(positionCount, loadedBlocks);
+        return wrapBlocksWithoutCopy(positionCount, blocks);
     }
 
     @Override

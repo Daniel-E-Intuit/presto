@@ -333,7 +333,8 @@ public class OrcSelectivePageSourceFactory
                     orcReaderOptions,
                     hiveFileContext.isCacheable(),
                     dwrfEncryptionProvider,
-                    dwrfKeyProvider);
+                    dwrfKeyProvider,
+                    hiveFileContext.getStats());
 
             List<HiveColumnHandle> physicalColumns = getPhysicalHiveColumnHandles(columns, useOrcColumnNames, reader.getTypes(), path);
 
@@ -410,7 +411,8 @@ public class OrcSelectivePageSourceFactory
                     recordReader,
                     reader.getOrcDataSource(),
                     systemMemoryUsage,
-                    stats);
+                    stats,
+                    hiveFileContext.getStats());
         }
         catch (Exception e) {
             try {

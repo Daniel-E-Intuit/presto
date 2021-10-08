@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.hive;
 
+import com.facebook.presto.cache.CacheConfig;
 import com.facebook.presto.orc.OrcWriteValidation.OrcWriteValidationMode;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.PrestoException;
@@ -20,6 +21,7 @@ import com.facebook.presto.spi.schedule.NodeSelectionStrategy;
 import com.facebook.presto.spi.session.PropertyMetadata;
 import com.google.common.collect.ImmutableList;
 import io.airlift.units.DataSize;
+import io.airlift.units.Duration;
 
 import javax.inject.Inject;
 
@@ -70,6 +72,7 @@ public final class HiveSessionProperties
     private static final String COMPRESSION_CODEC = "compression_codec";
     private static final String ORC_COMPRESSION_CODEC = "orc_compression_codec";
     public static final String RESPECT_TABLE_FORMAT = "respect_table_format";
+    private static final String CREATE_EMPTY_BUCKET_FILES = "create_empty_bucket_files";
     private static final String PARQUET_USE_COLUMN_NAME = "parquet_use_column_names";
     private static final String PARQUET_FAIL_WITH_CORRUPTED_STATISTICS = "parquet_fail_with_corrupted_statistics";
     private static final String PARQUET_MAX_READ_BLOCK_SIZE = "parquet_max_read_block_size";
@@ -91,7 +94,7 @@ public final class HiveSessionProperties
     private static final String OPTIMIZE_MISMATCHED_BUCKET_COUNT = "optimize_mismatched_bucket_count";
     private static final String S3_SELECT_PUSHDOWN_ENABLED = "s3_select_pushdown_enabled";
     public static final String SHUFFLE_PARTITIONED_COLUMNS_FOR_TABLE_WRITE = "shuffle_partitioned_columns_for_table_write";
-    private static final String TEMPORARY_STAGING_DIRECTORY_ENABLED = "temporary_staging_directory_enabled";
+    public static final String TEMPORARY_STAGING_DIRECTORY_ENABLED = "temporary_staging_directory_enabled";
     private static final String TEMPORARY_STAGING_DIRECTORY_PATH = "temporary_staging_directory_path";
     private static final String TEMPORARY_TABLE_SCHEMA = "temporary_table_schema";
     private static final String TEMPORARY_TABLE_STORAGE_FORMAT = "temporary_table_storage_format";
@@ -118,6 +121,8 @@ public final class HiveSessionProperties
     public static final String MANIFEST_VERIFICATION_ENABLED = "manifest_verification_enabled";
     public static final String NEW_PARTITION_USER_SUPPLIED_PARAMETER = "new_partition_user_supplied_parameter";
     public static final String OPTIMIZED_PARTITION_UPDATE_SERIALIZATION_ENABLED = "optimized_partition_update_serialization_enabled";
+    public static final String PARTITION_LEASE_DURATION = "partition_lease_duration";
+    public static final String CACHE_ENABLED = "cache_enabled";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -140,7 +145,7 @@ public final class HiveSessionProperties
     }
 
     @Inject
-    public HiveSessionProperties(HiveClientConfig hiveClientConfig, OrcFileWriterConfig orcFileWriterConfig, ParquetFileWriterConfig parquetFileWriterConfig)
+    public HiveSessionProperties(HiveClientConfig hiveClientConfig, OrcFileWriterConfig orcFileWriterConfig, ParquetFileWriterConfig parquetFileWriterConfig, CacheConfig cacheConfig)
     {
         sessionProperties = ImmutableList.of(
                 booleanProperty(
@@ -300,6 +305,11 @@ public final class HiveSessionProperties
                         RESPECT_TABLE_FORMAT,
                         "Write new partitions using table format rather than default storage format",
                         hiveClientConfig.isRespectTableFormat(),
+                        false),
+                booleanProperty(
+                        CREATE_EMPTY_BUCKET_FILES,
+                        "Create empty files for buckets that have no data",
+                        hiveClientConfig.isCreateEmptyBucketFiles(),
                         false),
                 booleanProperty(
                         PARQUET_USE_COLUMN_NAME,
@@ -557,7 +567,21 @@ public final class HiveSessionProperties
                         OPTIMIZED_PARTITION_UPDATE_SERIALIZATION_ENABLED,
                         "Serialize PartitionUpdate objects using binary SMILE encoding and compress with the ZSTD compression",
                         hiveClientConfig.isOptimizedPartitionUpdateSerializationEnabled(),
-                        true));
+                        true),
+                new PropertyMetadata<>(
+                        PARTITION_LEASE_DURATION,
+                        "Partition lease duration in seconds, 0 means disabled",
+                        VARCHAR,
+                        Duration.class,
+                        hiveClientConfig.getPartitionLeaseDuration(),
+                        false,
+                        value -> Duration.valueOf((String) value),
+                        Duration::toString),
+                booleanProperty(
+                        CACHE_ENABLED,
+                        "Enable cache for hive",
+                        cacheConfig.isCachingEnabled(),
+                        false));
     }
 
     public List<PropertyMetadata<?>> getSessionProperties()
@@ -710,6 +734,11 @@ public final class HiveSessionProperties
     public static boolean isRespectTableFormat(ConnectorSession session)
     {
         return session.getProperty(RESPECT_TABLE_FORMAT, Boolean.class);
+    }
+
+    public static boolean isCreateEmptyBucketFiles(ConnectorSession session)
+    {
+        return session.getProperty(CREATE_EMPTY_BUCKET_FILES, Boolean.class);
     }
 
     public static boolean isUseParquetColumnNames(ConnectorSession session)
@@ -976,5 +1005,15 @@ public final class HiveSessionProperties
     public static boolean isOptimizedPartitionUpdateSerializationEnabled(ConnectorSession session)
     {
         return session.getProperty(OPTIMIZED_PARTITION_UPDATE_SERIALIZATION_ENABLED, Boolean.class);
+    }
+
+    public static Duration getLeaseDuration(ConnectorSession session)
+    {
+        return session.getProperty(PARTITION_LEASE_DURATION, Duration.class);
+    }
+
+    public static boolean isCacheEnabled(ConnectorSession session)
+    {
+        return session.getProperty(CACHE_ENABLED, Boolean.class);
     }
 }

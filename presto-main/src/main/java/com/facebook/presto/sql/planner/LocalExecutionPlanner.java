@@ -246,12 +246,14 @@ import static com.facebook.airlift.concurrent.MoreFutures.addSuccessCallback;
 import static com.facebook.presto.SystemSessionProperties.getAggregationOperatorUnspillMemoryLimit;
 import static com.facebook.presto.SystemSessionProperties.getDynamicFilteringMaxPerDriverRowCount;
 import static com.facebook.presto.SystemSessionProperties.getDynamicFilteringMaxPerDriverSize;
+import static com.facebook.presto.SystemSessionProperties.getDynamicFilteringRangeRowLimitPerDriver;
 import static com.facebook.presto.SystemSessionProperties.getFilterAndProjectMinOutputPageRowCount;
 import static com.facebook.presto.SystemSessionProperties.getFilterAndProjectMinOutputPageSize;
 import static com.facebook.presto.SystemSessionProperties.getIndexLoaderTimeout;
 import static com.facebook.presto.SystemSessionProperties.getTaskConcurrency;
 import static com.facebook.presto.SystemSessionProperties.getTaskPartitionedWriterCount;
 import static com.facebook.presto.SystemSessionProperties.getTaskWriterCount;
+import static com.facebook.presto.SystemSessionProperties.isAggregationSpillEnabled;
 import static com.facebook.presto.SystemSessionProperties.isDistinctAggregationSpillEnabled;
 import static com.facebook.presto.SystemSessionProperties.isEnableDynamicFiltering;
 import static com.facebook.presto.SystemSessionProperties.isExchangeChecksumEnabled;
@@ -260,7 +262,9 @@ import static com.facebook.presto.SystemSessionProperties.isJoinSpillingEnabled;
 import static com.facebook.presto.SystemSessionProperties.isOptimizeCommonSubExpressions;
 import static com.facebook.presto.SystemSessionProperties.isOptimizedRepartitioningEnabled;
 import static com.facebook.presto.SystemSessionProperties.isOrderByAggregationSpillEnabled;
+import static com.facebook.presto.SystemSessionProperties.isOrderBySpillEnabled;
 import static com.facebook.presto.SystemSessionProperties.isSpillEnabled;
+import static com.facebook.presto.SystemSessionProperties.isWindowSpillEnabled;
 import static com.facebook.presto.common.type.BigintType.BIGINT;
 import static com.facebook.presto.common.type.TypeSignature.parseTypeSignature;
 import static com.facebook.presto.common.type.TypeUtils.writeNativeValue;
@@ -569,7 +573,7 @@ public class LocalExecutionPlanner
         LocalExecutionPlanContext context = new LocalExecutionPlanContext(taskContext, tableWriteInfo);
         PhysicalOperation physicalOperation = plan.accept(new Visitor(session, stageExecutionDescriptor, remoteSourceFactory, pageSinkCommitRequired), context);
 
-        Function<Page, Page> pagePreprocessor = enforceLayoutProcessor(outputLayout, physicalOperation.getLayout());
+        Function<Page, Page> pagePreprocessor = enforceLoadedLayoutProcessor(outputLayout, physicalOperation.getLayout());
 
         List<Type> outputTypes = outputLayout.stream()
                 .map(VariableReferenceExpression::getType)
@@ -1084,7 +1088,7 @@ public class LocalExecutionPlanner
                     node.getPreSortedOrderPrefix(),
                     10_000,
                     pagesIndexFactory,
-                    isSpillEnabled(session),
+                    isWindowSpillEnabled(session),
                     spillerFactory,
                     orderingCompiler);
 
@@ -1135,7 +1139,7 @@ public class LocalExecutionPlanner
                 outputChannels.add(i);
             }
 
-            boolean spillEnabled = isSpillEnabled(context.getSession());
+            boolean spillEnabled = isOrderBySpillEnabled(context.getSession());
 
             OperatorFactory operator = new OrderByOperatorFactory(
                     context.getNextOperatorId(),
@@ -1246,7 +1250,7 @@ public class LocalExecutionPlanner
             return planGroupByAggregation(
                     node,
                     source,
-                    spillEnabled,
+                    isAggregationSpillEnabled(session),
                     isDistinctAggregationSpillEnabled(session),
                     isOrderByAggregationSpillEnabled(session),
                     unspillMemoryLimit,
@@ -2008,14 +2012,19 @@ public class LocalExecutionPlanner
                     node.getId(),
                     nestedLoopJoinBridgeManager);
 
-            checkArgument(buildContext.getDriverInstanceCount().orElse(1) == 1, "Expected local execution to not be parallel");
+            int partitionCount = buildContext.getDriverInstanceCount().orElse(1);
+            checkArgument(partitionCount == 1, "Expected local execution to not be parallel");
+
+            ImmutableList.Builder<OperatorFactory> factoriesBuilder = new ImmutableList.Builder<>();
+            factoriesBuilder.addAll(buildSource.getOperatorFactories());
+            createDynamicFilter(buildSource, node, context, partitionCount).ifPresent(
+                    filter -> factoriesBuilder.add(createDynamicFilterSourceOperatorFactory(filter, node.getId(), buildSource, buildContext)));
+            factoriesBuilder.add(nestedLoopBuildOperatorFactory);
+
             context.addDriverFactory(
                     buildContext.isInputDriver(),
                     false,
-                    ImmutableList.<OperatorFactory>builder()
-                            .addAll(buildSource.getOperatorFactories())
-                            .add(nestedLoopBuildOperatorFactory)
-                            .build(),
+                    factoriesBuilder.build(),
                     buildContext.getDriverInstanceCount(),
                     buildSource.getPipelineExecutionStrategy(),
                     Optional.empty());
@@ -2323,7 +2332,8 @@ public class LocalExecutionPlanner
                     dynamicFilter.getTupleDomainConsumer(),
                     filterBuildChannels,
                     getDynamicFilteringMaxPerDriverRowCount(context.getSession()),
-                    getDynamicFilteringMaxPerDriverSize(context.getSession()));
+                    getDynamicFilteringMaxPerDriverSize(context.getSession()),
+                    getDynamicFilteringRangeRowLimitPerDriver(context.getSession()));
         }
 
         private Optional<LocalDynamicFilter> createDynamicFilter(PhysicalOperation buildSource, AbstractJoinNode node, LocalExecutionPlanContext context, int partitionCount)
@@ -2803,7 +2813,7 @@ public class LocalExecutionPlanner
 
             List<OperatorFactory> operatorFactories = new ArrayList<>(source.getOperatorFactories());
             List<VariableReferenceExpression> expectedLayout = node.getInputs().get(0);
-            Function<Page, Page> pagePreprocessor = enforceLayoutProcessor(expectedLayout, source.getLayout());
+            Function<Page, Page> pagePreprocessor = enforceLoadedLayoutProcessor(expectedLayout, source.getLayout());
             operatorFactories.add(new LocalExchangeSinkOperatorFactory(
                     exchangeFactory,
                     subContext.getNextOperatorId(),
@@ -2890,7 +2900,7 @@ public class LocalExecutionPlanner
                 LocalExecutionPlanContext subContext = driverFactoryParameters.getSubContext();
 
                 List<VariableReferenceExpression> expectedLayout = node.getInputs().get(i);
-                Function<Page, Page> pagePreprocessor = enforceLayoutProcessor(expectedLayout, source.getLayout());
+                Function<Page, Page> pagePreprocessor = enforceLoadedLayoutProcessor(expectedLayout, source.getLayout());
                 List<OperatorFactory> operatorFactories = new ArrayList<>(source.getOperatorFactories());
 
                 operatorFactories.add(new LocalExchangeSinkOperatorFactory(
@@ -3036,7 +3046,7 @@ public class LocalExecutionPlanner
         private PhysicalOperation planGroupByAggregation(
                 AggregationNode node,
                 PhysicalOperation source,
-                boolean spillEnabled,
+                boolean aggregationSpillEnabled,
                 boolean distinctAggregationSpillEnabled,
                 boolean orderByAggregationSpillEnabled,
                 DataSize unspillMemoryLimit,
@@ -3053,7 +3063,7 @@ public class LocalExecutionPlanner
                     node.getGroupIdVariable(),
                     source,
                     node.hasDefaultOutput(),
-                    spillEnabled,
+                    aggregationSpillEnabled,
                     distinctAggregationSpillEnabled,
                     orderByAggregationSpillEnabled,
                     node.isStreamable(),
@@ -3077,7 +3087,7 @@ public class LocalExecutionPlanner
                 Optional<VariableReferenceExpression> groupIdVariable,
                 PhysicalOperation source,
                 boolean hasDefaultOutput,
-                boolean spillEnabled,
+                boolean aggregationSpillEnabled,
                 boolean distinctSpillEnabled,
                 boolean orderBySpillEnabled,
                 boolean isStreamable,
@@ -3091,11 +3101,12 @@ public class LocalExecutionPlanner
         {
             List<VariableReferenceExpression> aggregationOutputVariables = new ArrayList<>();
             List<AccumulatorFactory> accumulatorFactories = new ArrayList<>();
+            boolean useSpill = aggregationSpillEnabled && !isStreamable && (!hasDistinct(aggregations) || distinctSpillEnabled) && (!hasOrderBy(aggregations) || orderBySpillEnabled);
             for (Map.Entry<VariableReferenceExpression, Aggregation> entry : aggregations.entrySet()) {
                 VariableReferenceExpression variable = entry.getKey();
                 Aggregation aggregation = entry.getValue();
 
-                accumulatorFactories.add(buildAccumulatorFactory(source, aggregation, !isStreamable && spillEnabled));
+                accumulatorFactories.add(buildAccumulatorFactory(source, aggregation, useSpill));
                 aggregationOutputVariables.add(variable);
             }
 
@@ -3152,14 +3163,22 @@ public class LocalExecutionPlanner
                         groupIdChannel,
                         expectedGroups,
                         maxPartialAggregationMemorySize,
-                        spillEnabled,
-                        distinctSpillEnabled,
-                        orderBySpillEnabled,
+                        useSpill,
                         unspillMemoryLimit,
                         spillerFactory,
                         joinCompiler,
                         useSystemMemory);
             }
+        }
+
+        private boolean hasDistinct(Map<VariableReferenceExpression, Aggregation> aggregations)
+        {
+            return aggregations.values().stream().anyMatch(aggregation -> aggregation.isDistinct());
+        }
+
+        private boolean hasOrderBy(Map<VariableReferenceExpression, Aggregation> aggregations)
+        {
+            return aggregations.values().stream().anyMatch(aggregation -> aggregation.getOrderBy().isPresent());
         }
     }
 
@@ -3203,7 +3222,7 @@ public class LocalExecutionPlanner
         };
     }
 
-    private static Function<Page, Page> enforceLayoutProcessor(List<VariableReferenceExpression> expectedLayout, Map<VariableReferenceExpression, Integer> inputLayout)
+    private static Function<Page, Page> enforceLoadedLayoutProcessor(List<VariableReferenceExpression> expectedLayout, Map<VariableReferenceExpression, Integer> inputLayout)
     {
         int[] channels = expectedLayout.stream()
                 .peek(variable -> checkArgument(inputLayout.containsKey(variable), "channel not found for variable: %s", variable))
@@ -3211,8 +3230,8 @@ public class LocalExecutionPlanner
                 .toArray();
 
         if (Arrays.equals(channels, range(0, inputLayout.size()).toArray())) {
-            // this is an identity mapping
-            return Function.identity();
+            // this is an identity mapping, simply ensuring that the page is fully loaded is sufficient
+            return PageChannelSelector.identitySelection();
         }
 
         return new PageChannelSelector(channels);

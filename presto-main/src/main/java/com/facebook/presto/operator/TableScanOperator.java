@@ -253,10 +253,10 @@ public class TableScanOperator
         if (page != null) {
             // assure the page is in memory before handing to another operator
             page = page.getLoadedPage();
-
-            // update operator stats
-            recordInputStats();
         }
+
+        // update operator stats
+        recordInputStats();
 
         // updating system memory usage should happen after page is loaded.
         systemMemoryContext.setBytes(source.getSystemMemoryUsage());
@@ -275,6 +275,7 @@ public class TableScanOperator
         long positionCount = endCompletedPositions - completedPositions;
         operatorContext.recordProcessedInput(inputBytes, positionCount);
         operatorContext.recordRawInputWithTiming(inputBytes, positionCount, endReadTimeNanos - readTimeNanos);
+        operatorContext.updateStats(source.getRuntimeStats());
         completedBytes = endCompletedBytes;
         completedPositions = endCompletedPositions;
         readTimeNanos = endReadTimeNanos;

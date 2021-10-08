@@ -175,6 +175,7 @@ import java.util.stream.Collectors;
 
 import static com.facebook.presto.SystemSessionProperties.getMaxGroupingSets;
 import static com.facebook.presto.SystemSessionProperties.isAllowWindowOrderByLiterals;
+import static com.facebook.presto.SystemSessionProperties.isMaterializedViewDataConsistencyEnabled;
 import static com.facebook.presto.common.predicate.TupleDomain.extractFixedValues;
 import static com.facebook.presto.common.type.BigintType.BIGINT;
 import static com.facebook.presto.common.type.BooleanType.BOOLEAN;
@@ -1207,7 +1208,7 @@ class StatementAnalyzer
 
             Optional<ConnectorMaterializedViewDefinition> optionalMaterializedView = metadata.getMaterializedView(session, name);
             Statement statement = analysis.getStatement();
-            if (optionalMaterializedView.isPresent() && statement instanceof Query) {
+            if (isMaterializedViewDataConsistencyEnabled(session) && optionalMaterializedView.isPresent() && statement instanceof Query) {
                 // When the materialized view has already been expanded, do not process it. Just use it as a table.
                 MaterializedViewAnalysisState materializedViewAnalysisState = analysis.getMaterializedViewAnalysisState(table);
                 QualifiedObjectName materializedViewName = createQualifiedObjectName(session, table, table.getName());
@@ -1215,7 +1216,7 @@ class StatementAnalyzer
                 if (materializedViewAnalysisState.isNotVisited()) {
                     MaterializedViewStatus materializedViewStatus = metadata.getMaterializedViewStatus(session, materializedViewName);
                     if (!materializedViewStatus.isFullyMaterialized()) {
-                        return processMaterializedView(table, materializedViewName, scope, name, optionalMaterializedView.get(), statement, materializedViewStatus);
+                        return processMaterializedView(table, materializedViewName, scope, name, optionalMaterializedView.get(), materializedViewStatus);
                     }
                 }
                 if (materializedViewAnalysisState.isVisited()) {
@@ -1323,11 +1324,11 @@ class StatementAnalyzer
                 Optional<Scope> scope,
                 QualifiedObjectName materializedViewQualifiedObjectName,
                 ConnectorMaterializedViewDefinition materializedViewDefinition,
-                Statement statement,
                 MaterializedViewStatus materializedViewStatus)
         {
-            validateMaterialziedViewQueryPlan(statement);
-            String newSql = getMaterializedViewSQL((Query) statement, materializedViewDefinition, materializedViewStatus);
+            validateMaterialziedViewQueryPlan(sqlParser.createStatement(materializedViewDefinition.getOriginalSql(), createParsingOptions(session, warningCollector)));
+
+            String newSql = getMaterializedViewSQL(materializedView, materializedViewDefinition, materializedViewStatus);
 
             Query query = (Query) sqlParser.createStatement(newSql, createParsingOptions(session, warningCollector));
             analysis.registerNamedQuery(materializedView, query);
@@ -1345,7 +1346,7 @@ class StatementAnalyzer
         }
 
         private String getMaterializedViewSQL(
-                Query statement,
+                Table materializedView,
                 ConnectorMaterializedViewDefinition connectorMaterializedViewDefinition,
                 MaterializedViewStatus materializedViewStatus)
         {
@@ -1364,7 +1365,7 @@ class StatementAnalyzer
             Query predicateStitchedQuery = (Query) new PredicateStitcher(session, partitionPredicates).process(createSqlStatement, new PredicateStitcherContext());
             QuerySpecification materializedViewQuerySpecification = new QuerySpecification(
                     selectList(new AllColumns()),
-                    ((QuerySpecification) statement.getQueryBody()).getFrom(),
+                    Optional.of(materializedView),
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),

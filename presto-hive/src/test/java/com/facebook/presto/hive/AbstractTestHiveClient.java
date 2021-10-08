@@ -1009,7 +1009,7 @@ public abstract class AbstractTestHiveClient
                 HiveTestUtils.PARTITION_UPDATE_SMILE_CODEC,
                 new TestingNodeManager("fake-environment"),
                 new HiveEventClient(),
-                new HiveSessionProperties(hiveClientConfig, new OrcFileWriterConfig(), new ParquetFileWriterConfig()),
+                new HiveSessionProperties(hiveClientConfig, new OrcFileWriterConfig(), new ParquetFileWriterConfig(), new CacheConfig()),
                 new HiveWriterStats(),
                 getDefaultOrcFileWriterFactory(hiveClientConfig, metastoreClientConfig));
         pageSourceProvider = new HivePageSourceProvider(hiveClientConfig, hdfsEnvironment, getDefaultHiveRecordCursorProvider(hiveClientConfig, metastoreClientConfig), getDefaultHiveBatchPageSourceFactories(hiveClientConfig, metastoreClientConfig), getDefaultHiveSelectivePageSourceFactories(hiveClientConfig, metastoreClientConfig), FUNCTION_AND_TYPE_MANAGER, ROW_EXPRESSION_SERVICE);
@@ -1039,7 +1039,7 @@ public abstract class AbstractTestHiveClient
 
     protected ConnectorSession newSession()
     {
-        return newSession(new HiveSessionProperties(getHiveClientConfig(), new OrcFileWriterConfig(), new ParquetFileWriterConfig()));
+        return newSession(new HiveSessionProperties(getHiveClientConfig(), new OrcFileWriterConfig(), new ParquetFileWriterConfig(), new CacheConfig()));
     }
 
     protected ConnectorSession newSession(HiveSessionProperties hiveSessionProperties)
@@ -1086,6 +1086,12 @@ public abstract class AbstractTestHiveClient
             public Optional<String> getClientInfo()
             {
                 return session.getClientInfo();
+            }
+
+            @Override
+            public Set<String> getClientTags()
+            {
+                return session.getClientTags();
             }
 
             @Override
@@ -3839,7 +3845,8 @@ public abstract class AbstractTestHiveClient
         return newSession(new HiveSessionProperties(
                 getHiveClientConfig().setPartitionStatisticsSampleSize(sampleSize),
                 new OrcFileWriterConfig(),
-                new ParquetFileWriterConfig()));
+                new ParquetFileWriterConfig(),
+                new CacheConfig()));
     }
 
     private void verifyViewCreation(SchemaTableName temporaryCreateView)
@@ -3939,7 +3946,7 @@ public abstract class AbstractTestHiveClient
                     outputHandle.getLocationHandle().getTargetPath().toString(),
                     true);
             for (String filePath : listAllDataFiles(context, getStagingPathRoot(outputHandle))) {
-                assertTrue(new Path(filePath).getName().startsWith(getFilePrefix(outputHandle)));
+                assertTrue(new Path(filePath).getName().startsWith(session.getQueryId()));
             }
 
             // commit the table
@@ -4139,7 +4146,7 @@ public abstract class AbstractTestHiveClient
             Set<String> tempFiles = listAllDataFiles(context, stagingPathRoot);
             assertTrue(!tempFiles.isEmpty());
             for (String filePath : tempFiles) {
-                assertTrue(new Path(filePath).getName().startsWith(getFilePrefix(insertTableHandle)));
+                assertTrue(new Path(filePath).getName().startsWith(session.getQueryId()));
             }
 
             // rollback insert
@@ -4176,16 +4183,6 @@ public abstract class AbstractTestHiveClient
     }
 
     // These are protected so extensions to the hive connector can replace the handle classes
-    protected String getFilePrefix(ConnectorOutputTableHandle outputTableHandle)
-    {
-        return ((HiveWritableTableHandle) outputTableHandle).getFilePrefix();
-    }
-
-    protected String getFilePrefix(ConnectorInsertTableHandle insertTableHandle)
-    {
-        return ((HiveWritableTableHandle) insertTableHandle).getFilePrefix();
-    }
-
     protected Path getStagingPathRoot(ConnectorInsertTableHandle insertTableHandle)
     {
         HiveInsertTableHandle handle = (HiveInsertTableHandle) insertTableHandle;
@@ -4356,7 +4353,7 @@ public abstract class AbstractTestHiveClient
             Set<String> tempFiles = listAllDataFiles(context, getStagingPathRoot(insertTableHandle));
             assertTrue(!tempFiles.isEmpty());
             for (String filePath : tempFiles) {
-                assertTrue(new Path(filePath).getName().startsWith(getFilePrefix(insertTableHandle)));
+                assertTrue(new Path(filePath).getName().startsWith(session.getQueryId()));
             }
 
             // rollback insert
@@ -4484,7 +4481,7 @@ public abstract class AbstractTestHiveClient
             Set<String> tempFiles = listAllDataFiles(context, getStagingPathRoot(insertTableHandle));
             assertTrue(!tempFiles.isEmpty());
             for (String filePath : tempFiles) {
-                assertTrue(new Path(filePath).getName().startsWith(getFilePrefix(insertTableHandle)));
+                assertTrue(new Path(filePath).getName().startsWith(session.getQueryId()));
             }
 
             // verify statistics are visible from within of the current transaction

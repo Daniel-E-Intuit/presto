@@ -76,6 +76,7 @@ public class TestHiveClientConfig
                 .setOrcCompressionCodec(HiveCompressionCodec.GZIP)
                 .setRespectTableFormat(true)
                 .setImmutablePartitions(false)
+                .setCreateEmptyBucketFiles(true)
                 .setInsertOverwriteImmutablePartitionEnabled(false)
                 .setFailFastOnInsertIntoImmutablePartitionsEnabled(true)
                 .setSortedWritingEnabled(true)
@@ -151,7 +152,8 @@ public class TestHiveClientConfig
                 .setPreferManifestsToListFiles(false)
                 .setManifestVerificationEnabled(false)
                 .setUndoMetastoreOperationsEnabled(true)
-                .setOptimizedPartitionUpdateSerializationEnabled(false));
+                .setOptimizedPartitionUpdateSerializationEnabled(false)
+                .setPartitionLeaseDuration(new Duration(0, TimeUnit.SECONDS)));
     }
 
     @Test
@@ -185,6 +187,7 @@ public class TestHiveClientConfig
                 .put("hive.orc-compression-codec", "ZSTD")
                 .put("hive.respect-table-format", "false")
                 .put("hive.immutable-partitions", "true")
+                .put("hive.create-empty-bucket-files", "false")
                 .put("hive.insert-overwrite-immutable-partitions-enabled", "true")
                 .put("hive.fail-fast-on-insert-into-immutable-partitions-enabled", "false")
                 .put("hive.max-partitions-per-writers", "222")
@@ -264,6 +267,7 @@ public class TestHiveClientConfig
                 .put("hive.manifest-verification-enabled", "true")
                 .put("hive.undo-metastore-operations-enabled", "false")
                 .put("hive.experimental-optimized-partition-update-serialization-enabled", "true")
+                .put("hive.partition-lease-duration", "4h")
                 .build();
 
         HiveClientConfig expected = new HiveClientConfig()
@@ -295,6 +299,7 @@ public class TestHiveClientConfig
                 .setOrcCompressionCodec(HiveCompressionCodec.ZSTD)
                 .setRespectTableFormat(false)
                 .setImmutablePartitions(true)
+                .setCreateEmptyBucketFiles(false)
                 .setInsertOverwriteImmutablePartitionEnabled(true)
                 .setFailFastOnInsertIntoImmutablePartitionsEnabled(false)
                 .setMaxPartitionsPerWriter(222)
@@ -372,7 +377,8 @@ public class TestHiveClientConfig
                 .setPreferManifestsToListFiles(true)
                 .setManifestVerificationEnabled(true)
                 .setUndoMetastoreOperationsEnabled(false)
-                .setOptimizedPartitionUpdateSerializationEnabled(true);
+                .setOptimizedPartitionUpdateSerializationEnabled(true)
+                .setPartitionLeaseDuration(new Duration(4, TimeUnit.HOURS));
 
         ConfigAssertions.assertFullMapping(properties, expected);
     }

@@ -287,6 +287,9 @@ public class ScanFilterAndProjectOperator
                 mergingOutput.addInput(output);
             }
 
+            // stats update
+            recordInputStats();
+
             if (finishing) {
                 mergingOutput.finish();
             }
@@ -341,6 +344,7 @@ public class ScanFilterAndProjectOperator
         long positionCount = endCompletedPositions - completedPositions;
         operatorContext.recordProcessedInput(inputBytes, positionCount);
         operatorContext.recordRawInputWithTiming(inputBytes, positionCount, endReadTimeNanos - readTimeNanos);
+        operatorContext.updateStats(pageSource.getRuntimeStats());
         completedBytes = endCompletedBytes;
         completedPositions = endCompletedPositions;
         readTimeNanos = endReadTimeNanos;
@@ -363,8 +367,6 @@ public class ScanFilterAndProjectOperator
                 blockSizeSum += block.getSizeInBytes();
             }
         }
-        // stats update
-        recordInputStats();
 
         return (blocks == null) ? page : new Page(page.getPositionCount(), blocks);
     }

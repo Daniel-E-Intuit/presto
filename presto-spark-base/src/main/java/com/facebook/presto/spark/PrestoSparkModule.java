@@ -92,6 +92,7 @@ import com.facebook.presto.operator.OperatorInfo;
 import com.facebook.presto.operator.OperatorStats;
 import com.facebook.presto.operator.PagesIndex;
 import com.facebook.presto.operator.TableCommitContext;
+import com.facebook.presto.operator.TaskMemoryReservationSummary;
 import com.facebook.presto.operator.index.IndexJoinLookupStats;
 import com.facebook.presto.resourcemanager.NoopResourceGroupService;
 import com.facebook.presto.resourcemanager.ResourceGroupService;
@@ -160,6 +161,10 @@ import com.facebook.presto.sql.tree.Statement;
 import com.facebook.presto.transaction.InMemoryTransactionManager;
 import com.facebook.presto.transaction.TransactionManager;
 import com.facebook.presto.transaction.TransactionManagerConfig;
+import com.facebook.presto.ttl.clusterttlprovidermanagers.ClusterTtlProviderManager;
+import com.facebook.presto.ttl.clusterttlprovidermanagers.ThrowingClusterTtlProviderManager;
+import com.facebook.presto.ttl.nodettlfetchermanagers.NodeTtlFetcherManager;
+import com.facebook.presto.ttl.nodettlfetchermanagers.ThrowingNodeTtlFetcherManager;
 import com.facebook.presto.type.TypeDeserializer;
 import com.facebook.presto.version.EmbedVersion;
 import com.google.inject.Binder;
@@ -238,6 +243,7 @@ public class PrestoSparkModule
         jsonCodecBinder(binder).bindJsonCodec(QueryInfo.class);
         jsonCodecBinder(binder).bindJsonCodec(PrestoSparkQueryStatusInfo.class);
         jsonCodecBinder(binder).bindJsonCodec(PrestoSparkQueryData.class);
+        jsonCodecBinder(binder).bindListJsonCodec(TaskMemoryReservationSummary.class);
 
         // smile codecs
         smileCodecBinder(binder).bindSmileCodec(TaskSource.class);
@@ -426,6 +432,8 @@ public class PrestoSparkModule
         binder.bind(ClusterMemoryPoolManager.class).toInstance(((poolId, listener) -> {}));
         binder.bind(QueryPrerequisitesManager.class).in(Scopes.SINGLETON);
         binder.bind(ResourceGroupService.class).to(NoopResourceGroupService.class).in(Scopes.SINGLETON);
+        binder.bind(NodeTtlFetcherManager.class).to(ThrowingNodeTtlFetcherManager.class).in(Scopes.SINGLETON);
+        binder.bind(ClusterTtlProviderManager.class).to(ThrowingClusterTtlProviderManager.class).in(Scopes.SINGLETON);
 
         // TODO: Decouple and remove: required by SessionPropertyDefaults, PluginManager, InternalResourceGroupManager, ConnectorManager
         configBinder(binder).bindConfig(NodeConfig.class);

@@ -89,6 +89,7 @@ public class HiveClientConfig
     private HiveCompressionCodec orcCompressionCodec = HiveCompressionCodec.GZIP;
     private boolean respectTableFormat = true;
     private boolean immutablePartitions;
+    private boolean createEmptyBucketFiles = true;
     private boolean insertOverwriteImmutablePartitions;
     private boolean failFastOnInsertIntoImmutablePartitionsEnabled = true;
     private int maxPartitionsPerWriter = 100;
@@ -189,6 +190,8 @@ public class HiveClientConfig
     private boolean undoMetastoreOperationsEnabled = true;
 
     private boolean optimizedPartitionUpdateSerializationEnabled;
+
+    private Duration partitionLeaseDuration = new Duration(0, TimeUnit.SECONDS);
 
     public int getMaxInitialSplits()
     {
@@ -581,6 +584,19 @@ public class HiveClientConfig
     public HiveClientConfig setImmutablePartitions(boolean immutablePartitions)
     {
         this.immutablePartitions = immutablePartitions;
+        return this;
+    }
+
+    public boolean isCreateEmptyBucketFiles()
+    {
+        return createEmptyBucketFiles;
+    }
+
+    @Config("hive.create-empty-bucket-files")
+    @ConfigDescription("Create empty files for buckets that have no data")
+    public HiveClientConfig setCreateEmptyBucketFiles(boolean createEmptyBucketFiles)
+    {
+        this.createEmptyBucketFiles = createEmptyBucketFiles;
         return this;
     }
 
@@ -1597,16 +1613,29 @@ public class HiveClientConfig
         return undoMetastoreOperationsEnabled;
     }
 
-    public boolean isOptimizedPartitionUpdateSerializationEnabled()
-    {
-        return optimizedPartitionUpdateSerializationEnabled;
-    }
-
     @Config("hive.experimental-optimized-partition-update-serialization-enabled")
     @ConfigDescription("Serialize PartitionUpdate objects using binary SMILE encoding and compress with the ZSTD compression")
     public HiveClientConfig setOptimizedPartitionUpdateSerializationEnabled(boolean optimizedPartitionUpdateSerializationEnabled)
     {
         this.optimizedPartitionUpdateSerializationEnabled = optimizedPartitionUpdateSerializationEnabled;
         return this;
+    }
+
+    public boolean isOptimizedPartitionUpdateSerializationEnabled()
+    {
+        return optimizedPartitionUpdateSerializationEnabled;
+    }
+
+    @Config("hive.partition-lease-duration")
+    @ConfigDescription("Partition lease duration")
+    public HiveClientConfig setPartitionLeaseDuration(Duration partitionLeaseDuration)
+    {
+        this.partitionLeaseDuration = partitionLeaseDuration;
+        return this;
+    }
+
+    public Duration getPartitionLeaseDuration()
+    {
+        return partitionLeaseDuration;
     }
 }

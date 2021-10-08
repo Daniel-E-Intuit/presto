@@ -13,10 +13,10 @@
  */
 package com.facebook.presto.orc.metadata;
 
+import com.facebook.presto.common.RuntimeStats;
 import com.facebook.presto.orc.DwrfEncryptionProvider;
 import com.facebook.presto.orc.DwrfKeyProvider;
 import com.facebook.presto.orc.OrcCorruptionException;
-import com.facebook.presto.orc.OrcDataSource;
 import com.facebook.presto.orc.OrcDataSourceId;
 import com.facebook.presto.orc.metadata.PostScript.HiveWriterVersion;
 import com.facebook.presto.orc.metadata.statistics.StringStatistics;
@@ -30,8 +30,10 @@ import org.testng.annotations.Test;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static com.facebook.presto.orc.metadata.OrcMetadataReader.maxStringTruncateToValidRange;
 import static com.facebook.presto.orc.metadata.OrcMetadataReader.minStringTruncateToValidRange;
@@ -49,7 +51,7 @@ public class TestDwrfMetadataReader
 {
     private final long footerLength = 10;
     private final long compressionBlockSize = 8192;
-    private final DwrfMetadataReader dwrfMetadataReader = new DwrfMetadataReader();
+    private final DwrfMetadataReader dwrfMetadataReader = new DwrfMetadataReader(new RuntimeStats());
     private final DwrfProto.PostScript baseProtoPostScript = DwrfProto.PostScript.newBuilder()
             .setWriterVersion(HiveWriterVersion.ORC_HIVE_8732.getOrcWriterVersion())
             .setFooterLength(footerLength)
@@ -127,6 +129,35 @@ public class TestDwrfMetadataReader
     }
 
     @Test
+    public void testStripeInformationRows()
+            throws IOException
+    {
+        long aLongNumber = Integer.MAX_VALUE + 1000L;
+        for (OptionalLong stripeRawDataSize : ImmutableList.of(OptionalLong.empty(), OptionalLong.of(1_000_123))) {
+            StripeInformation expectedStripeInformation = new StripeInformation(aLongNumber, aLongNumber, aLongNumber, aLongNumber, aLongNumber, stripeRawDataSize, ImmutableList.of());
+            DwrfProto.StripeInformation dwrfStripeInformation = DwrfMetadataWriter.toStripeInformation(expectedStripeInformation);
+
+            DwrfProto.Footer protoFooter = DwrfProto.Footer.newBuilder()
+                    .setNumberOfRows(aLongNumber)
+                    .setRowIndexStride(10_000)
+                    .addStripes(dwrfStripeInformation)
+                    .build();
+
+            Footer footer = convertToFooter(protoFooter);
+            assertEquals(footer.getNumberOfRows(), aLongNumber);
+            assertEquals(footer.getStripes().size(), 1);
+            StripeInformation actualStripeInformation = footer.getStripes().get(0);
+            assertEquals(actualStripeInformation.getOffset(), expectedStripeInformation.getOffset());
+            assertEquals(actualStripeInformation.getNumberOfRows(), expectedStripeInformation.getNumberOfRows());
+            assertEquals(actualStripeInformation.getIndexLength(), expectedStripeInformation.getIndexLength());
+            assertEquals(actualStripeInformation.getDataLength(), expectedStripeInformation.getDataLength());
+            assertEquals(actualStripeInformation.getFooterLength(), expectedStripeInformation.getFooterLength());
+            assertEquals(actualStripeInformation.getTotalLength(), expectedStripeInformation.getTotalLength());
+            assertEquals(actualStripeInformation.getRawDataSize(), expectedStripeInformation.getRawDataSize());
+        }
+    }
+
+    @Test
     public void testReadFooter()
             throws IOException
     {
@@ -134,25 +165,39 @@ public class TestDwrfMetadataReader
         int rowIndexStride = 11;
         List<Integer> stripeCacheOffsets = ImmutableList.of(1, 2, 3);
 
-        DwrfProto.Footer protoFooter = DwrfProto.Footer.newBuilder()
-                .setNumberOfRows(numberOfRows)
-                .setRowIndexStride(rowIndexStride)
-                .addAllStripeCacheOffsets(stripeCacheOffsets)
-                .build();
+        for (OptionalLong rawDataSize : ImmutableList.of(OptionalLong.empty(), OptionalLong.of(1_000_123))) {
+            DwrfProto.Footer.Builder protoFooterBuilder = DwrfProto.Footer.newBuilder()
+                    .setNumberOfRows(numberOfRows)
+                    .setRowIndexStride(rowIndexStride)
+                    .addAllStripeCacheOffsets(stripeCacheOffsets);
+
+            if (rawDataSize.isPresent()) {
+                protoFooterBuilder.setRawDataSize(rawDataSize.getAsLong());
+            }
+
+            DwrfProto.Footer protoFooter = protoFooterBuilder.build();
+            Footer footer = convertToFooter(protoFooter);
+
+            assertEquals(footer.getNumberOfRows(), numberOfRows);
+            assertEquals(footer.getRowsInRowGroup(), rowIndexStride);
+            assertEquals(footer.getDwrfStripeCacheOffsets().get(), stripeCacheOffsets);
+            assertEquals(footer.getRawSize(), rawDataSize);
+            assertEquals(footer.getStripes(), Collections.emptyList());
+        }
+    }
+
+    private Footer convertToFooter(DwrfProto.Footer protoFooter)
+            throws IOException
+    {
         byte[] data = protoFooter.toByteArray();
         InputStream inputStream = new ByteArrayInputStream(data);
-        OrcDataSource orcDataSource = null; // orcDataSource only needed for encrypted files
 
-        Footer footer = dwrfMetadataReader.readFooter(HiveWriterVersion.ORC_HIVE_8732,
+        return dwrfMetadataReader.readFooter(HiveWriterVersion.ORC_HIVE_8732,
                 inputStream,
                 DwrfEncryptionProvider.NO_ENCRYPTION,
                 DwrfKeyProvider.EMPTY,
-                orcDataSource,
+                null, // orcDataSource only needed for encrypted files
                 Optional.empty());
-
-        assertEquals(footer.getNumberOfRows(), numberOfRows);
-        assertEquals(footer.getRowsInRowGroup(), rowIndexStride);
-        assertEquals(footer.getDwrfStripeCacheOffsets().get(), stripeCacheOffsets);
     }
 
     @Test

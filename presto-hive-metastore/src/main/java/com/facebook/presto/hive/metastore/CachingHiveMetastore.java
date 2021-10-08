@@ -670,7 +670,11 @@ public class CachingHiveMetastore
             HivePartitionName hivePartitionName = hivePartitionName(databaseName, tableName, partitionNameWithVersion.getPartitionName());
             KeyAndContext<HivePartitionName> partitionNameKey = getCachingKey(metastoreContext, hivePartitionName);
             Optional<Partition> partition = partitionCache.getIfPresent(partitionNameKey);
-            if (partition != null && partition.isPresent()) {
+            if (partition == null || !partition.isPresent()) {
+                partitionCache.invalidate(partitionNameKey);
+                partitionStatisticsCache.invalidate(partitionNameKey);
+            }
+            else {
                 Optional<Long> partitionVersion = partition.get().getPartitionVersion();
                 if (!partitionVersion.isPresent() || !partitionVersion.equals(partitionNameWithVersion.getPartitionVersion())) {
                     partitionCache.invalidate(partitionNameKey);
@@ -929,6 +933,12 @@ public class CachingHiveMetastore
     public Set<HivePrivilegeInfo> listTablePrivileges(MetastoreContext metastoreContext, String databaseName, String tableName, PrestoPrincipal principal)
     {
         return get(tablePrivilegesCache, getCachingKey(metastoreContext, new UserTableKey(principal, databaseName, tableName)));
+    }
+
+    @Override
+    public void setPartitionLeases(MetastoreContext metastoreContext, String databaseName, String tableName, Map<String, String> partitionNameToLocation, Duration leaseDuration)
+    {
+        delegate.setPartitionLeases(metastoreContext, databaseName, tableName, partitionNameToLocation, leaseDuration);
     }
 
     public Set<HivePrivilegeInfo> loadTablePrivileges(KeyAndContext<UserTableKey> loadTablePrivilegesKey)

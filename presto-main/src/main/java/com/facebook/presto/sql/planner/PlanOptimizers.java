@@ -97,6 +97,7 @@ import com.facebook.presto.sql.planner.iterative.rule.RemoveUnreferencedScalarAp
 import com.facebook.presto.sql.planner.iterative.rule.RemoveUnreferencedScalarLateralNodes;
 import com.facebook.presto.sql.planner.iterative.rule.RemoveUnsupportedDynamicFilters;
 import com.facebook.presto.sql.planner.iterative.rule.ReorderJoins;
+import com.facebook.presto.sql.planner.iterative.rule.RewriteAggregationIfToFilter;
 import com.facebook.presto.sql.planner.iterative.rule.RewriteFilterWithExternalFunctionToProject;
 import com.facebook.presto.sql.planner.iterative.rule.RewriteSpatialPartitioningAggregation;
 import com.facebook.presto.sql.planner.iterative.rule.RuntimeReorderJoinSides;
@@ -281,6 +282,7 @@ public class PlanOptimizers
                         statsCalculator,
                         estimatedExchangesCostCalculator,
                         ImmutableSet.<Rule<?>>builder()
+                                .addAll(new InlineSqlFunctions(metadata, sqlParser).rules())
                                 .addAll(new DesugarLambdaExpression().rules())
                                 .addAll(new DesugarAtTimeZone(metadata, sqlParser).rules())
                                 .addAll(new DesugarCurrentUser().rules())
@@ -351,11 +353,6 @@ public class PlanOptimizers
                         ruleStats,
                         statsCalculator,
                         estimatedExchangesCostCalculator,
-                        new InlineSqlFunctions(metadata, sqlParser).rules()),
-                new IterativeOptimizer(
-                        ruleStats,
-                        statsCalculator,
-                        estimatedExchangesCostCalculator,
                         columnPruningRules),
                 new IterativeOptimizer(
                         ruleStats,
@@ -403,6 +400,11 @@ public class PlanOptimizers
         // After this point, all planNodes should not contain OriginalExpression
 
         builder.add(
+                new IterativeOptimizer(
+                        ruleStats,
+                        statsCalculator,
+                        estimatedExchangesCostCalculator,
+                        ImmutableSet.of(new RewriteAggregationIfToFilter(metadata.getFunctionAndTypeManager()))),
                 predicatePushDown,
                 new IterativeOptimizer(
                         ruleStats,
@@ -481,6 +483,9 @@ public class PlanOptimizers
                         new RewriteFilterWithExternalFunctionToProject(metadata.getFunctionAndTypeManager()),
                         new PlanRemotePojections(metadata.getFunctionAndTypeManager()))));
 
+        // This rule must be applied before the connector optimizer rules which might fully push down filters to the connector.
+        builder.add(new MetadataQueryOptimizer(metadata));
+
         // Pass a supplier so that we pickup connector optimizers that are installed later
         builder.add(
                 new ApplyConnectorOptimization(() -> planOptimizerManager.getOptimizers(LOGICAL)),
@@ -496,8 +501,6 @@ public class PlanOptimizers
 
         builder.add(predicatePushDown); // Run predicate push down one more time in case we can leverage new information from layouts' effective predicate
         builder.add(simplifyRowExpressionOptimizer); // Should be always run after PredicatePushDown
-
-        builder.add(new MetadataQueryOptimizer(metadata));
 
         // This can pull up Filter and Project nodes from between Joins, so we need to push them down again
         builder.add(
