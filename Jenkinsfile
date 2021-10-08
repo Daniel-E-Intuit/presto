@@ -14,8 +14,8 @@ pipeline {
                     iam.amazonaws.com/role: ${jenkinsRole}
             spec:
                 containers:
-                - name: sbt
-                  image: 'docker.intuit.com/data/kgpt/curation/service/jenkins-toolbox:ce3b7d6e928bc8f9224b3d14f8f43c380aa55027'
+                - name: presto-oss
+                  image: 'docker.intuit.com/data/kgpt/curation/service/jenkins-toolbox:latest'
                   command:
                   - cat
                   tty: true
@@ -33,25 +33,54 @@ pipeline {
     stage('init') {
       steps {
         echo 'Installing Dependencies'
+	  container('presto-oss') {
+            sh '''
+	    java -version
+	    mvn -v
+	    dos2unix -V
+	    python3 -m venv venv
+	    '''
+        echo 'Dependencies Already Installed'
+	  }
       }
     }
 
     stage('Build') {
       steps {
         echo 'building Maven Package'
+          container('presto-oss') {
+            echo 'purge m2 local dependencies'
+            sh '''
+	    rm -rf $HOME/.m2/*
+	    '''
+	    echo 'convert files to unix format to avoid style errors'
+            sh '''
+            find . -type f -print0 | xargs -0 -n 1 -P 4 dos2unix
+	    '''
+            echo 'compile the entire project with root pom.xml maven file'
+            sh '''
+	    mvn -pl -presto-docs clean install -DskipTests
+	    '''
+          }
       }
     }
 
     stage('Unit Test') {
       steps {
         echo 'Unit Testing'
-        echo 'Integration Test'
+	sh '''
+	ls -lstr
+	ls -lstr target/
+	'''
+        echo 'mvn test'
+	echo 'Integration Test'
       }
     }
 
     stage('Deploy Artifact') {
       steps {
         echo 'Deploy Artifact'
+	  mavenBuildRelease(config,"-U -B -s settings.xml")
       }
     }
 
